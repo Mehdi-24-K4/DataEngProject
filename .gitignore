@@ -1,0 +1,10 @@
+# Environnement virtuel Python
+air_quality_env/
+
+# Fichiers Python compilés
+__pycache__/
+*.pyc
+
+# Autres fichiers/dossiers à ignorer
+.env
+*.log
