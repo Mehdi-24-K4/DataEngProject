@@ -1,0 +1,11 @@
+# Ignore specific directories
+AIProject/
+MongoSparkConnector/
+air_quality_env/
+
+# Ignore all __pycache__ directories
+**/__pycache__/
+
+# Ignore specific files
+testPostgresql.py
+transformations.py
