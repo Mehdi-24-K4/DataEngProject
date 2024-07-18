@@ -289,8 +289,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-# [Environment]::SetEnvironmentVariable("HADOOP_HOME", "C:\Users\amine\OneDrive\Bureau\ProjetsMehdi\ProjetDataEngMehdi\hadoop-3.4.0-src\dev-support", "User")
-# [Environment]::SetEnvironmentVariable("HADOOP_HOME", "C:\Users\amine\OneDrive\Bureau\ProjetsMehdi\ProjetDataEngMehdi\hadoop-3.4.0-src\dev-support\bin", "amine")
-# spark-submit --jars file:///C:/Users/amine/OneDrive/Bureau/ProjetsMehdi/Projet2/MongoSparkConnector/mongo-spark-connector_2.12-3.0.1.jar,file:///C:/Users/amine/OneDrive/Bureau/ProjetsMehdi/Projet2/MongoSparkConnector/bson-4.0.5.jar testSpark.py
