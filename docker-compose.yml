@@ -4,6 +4,8 @@ services:
     image: confluentinc/cp-zookeeper:5.5.3
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
+    networks:
+      - my-network
 
   kafka:
     image: confluentinc/cp-enterprise-kafka:5.5.3
@@ -18,6 +20,8 @@ services:
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+    networks:
+      - my-network
 
   schema-registry:
     image: confluentinc/cp-schema-registry:5.5.3
@@ -28,6 +32,9 @@ services:
     ports:
       - 8081:8081
     depends_on: [zookeeper, kafka]
+    networks:
+      - my-network
+
   mongodb:
     image: mongo:latest
     container_name: mongo
@@ -35,6 +42,8 @@ services:
       - "27017:27017"
     volumes:
       - mongo-data:/data/db
+    networks:
+      - my-network
 
   spark-master:
     image: bitnami/spark:latest
@@ -48,6 +57,8 @@ services:
     ports:
       - "8080:8080"
       - "7077:7077"
+    networks:
+      - my-network
 
   spark-worker:
     image: bitnami/spark:latest
@@ -55,12 +66,17 @@ services:
     environment:
       - SPARK_MODE=worker
       - SPARK_MASTER_URL=spark://spark-master:7077
-      - SPARK_WORKER_MEMORY=1G
-      - SPARK_WORKER_CORES=1
+      - SPARK_WORKER_MEMORY=2G
+      - SPARK_WORKER_CORES=2
+      - SPARK_WORKER_PORT=8081
+      - SPARK_DRIVER_EXTRA_JAVA_OPTIONS=-Dspark.rpc.message.maxSize=256
+      - SPARK_EXECUTOR_EXTRA_JAVA_OPTIONS=-Dspark.rpc.message.maxSize=256
     depends_on:
       - spark-master
     ports:
       - "8082:8081"  # Change to a different port
+    networks:
+      - my-network
 
   postgres:
     image: postgres:latest
@@ -72,6 +88,30 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    networks:
+      - my-network
+
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - postgres
+    networks:
+      - my-network
+
 volumes:
   mongo-data:
   pgdata:
+  grafana_data:
+
+networks:
+  my-network:
+    driver: bridge

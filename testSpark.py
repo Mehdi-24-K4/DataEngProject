@@ -1,7 +1,10 @@
 from pyspark.sql import SparkSession
 from constantes import MONGO_URI, MONGO_DB, MONGO_COLLECTION
-from pyspark.sql.functions import col, lower, explode, year, month, dayofmonth, hour, avg, when
+from pyspark.sql.functions import col, year, month, dayofmonth, hour, avg, when, monotonically_increasing_id, to_timestamp, max
 from sqlalchemy import create_engine, text
+from pyspark.sql.window import Window
+from pyspark.sql import functions as F
+
 def read_data_from_mongodb(spark_session):
     """
     Reads data from MongoDB using the provided Spark session and returns a DataFrame.
@@ -16,17 +19,103 @@ def read_data_from_mongodb(spark_session):
     data_frame = spark_session.read.format("com.mongodb.spark.sql.DefaultSource") \
         .option("uri", mongo_uri) \
         .load()
-    
+    data_frame.show()
+    data_frame = data_frame.repartition(100)
     return data_frame
 
 
+def convert_to_si(parameter_name, value, unit):
+    # Dictionnaire des conversions pour chaque paramètre
+    conversions = {
+        'co': {
+            'ppm': lambda x: (x * 1145.94, 'µg/m³'),   # Conversion de ppm à µg/m³
+            'ppb': lambda x: (x * 1.14594, 'µg/m³'),    # Conversion de ppb à µg/m³
+            'µg/m³': lambda x: (x, 'µg/m³')             # µg/m³ est déjà l'unité SI
+        },
+        'no2': {
+            'ppm': lambda x: (x * 1912.87, 'µg/m³'),  # Conversion de ppm à µg/m³
+            'ppb': lambda x: (x * 1.91287, 'µg/m³'),   # Conversion de ppb à µg/m³
+            'µg/m³': lambda x: (x, 'µg/m³')             # µg/m³ est déjà l'unité SI
+        },
+        'so2': {
+            'ppm': lambda x: (x * 2620.8, 'µg/m³'),    # Conversion de ppm à µg/m³
+            'ppb': lambda x: (x * 2.6208, 'µg/m³'),    # Conversion de ppb à µg/m³
+            'µg/m³': lambda x: (x, 'µg/m³')            # µg/m³ est déjà l'unité SI
+        },
+        'o3': {
+            'ppb': lambda x: (x * 2.0, 'µg/m³'),        # Conversion de ppb à µg/m³ (approximation)
+            'µg/m³': lambda x: (x, 'µg/m³')             # µg/m³ est déjà l'unité SI
+        },
+        'pm': {
+            'µg/m³': lambda x: (x, 'µg/m³')             # PM est toujours en µg/m³
+        },
+        'humidity': {
+            '%': lambda x: (x, '%')                 # L'humidité reste en pourcentage
+        },
+        'pressure': {
+            'hpa': lambda x: (x * 100,  'Pa'),       # Conversion de hPa à Pa
+            'mb': lambda x: (x * 100,  'Pa'),         # Conversion de mb à Pa (1 hPa = 1 mb)
+            'pa': lambda x: (x,  'Pa')                # Pa est déjà l'unité SI
+        },
+        'temperature': {
+            'f': lambda x: ((x - 32) * 5/9, '°C'),   # Conversion de °F à °C
+            'c': lambda x: (x, '°C'),                # °C est déjà l'unité SI
+            'k': lambda x: (x - 273.15, '°C')        # Conversion de K à °C
+        }
+    }
+
+    # Gestion des paramètres de type PM (PM1, PM10, PM2.5, PM4)
+    if parameter_name.startswith('pm'):
+        parameter_type = 'pm'
+    else:
+        parameter_type = parameter_name
+    
+    # Vérifier si le paramètre et l'unité sont reconnus
+    if parameter_type in conversions:
+        if unit in conversions[parameter_type]:
+            value_converted, new_unit = conversions[parameter_type][unit](value)
+            return value_converted, new_unit
+        else:
+            raise ValueError(f"Unité '{unit}' non reconnue pour le paramètre '{parameter_name}'")
+    else:
+        raise ValueError(f"Paramètre '{parameter_name}' non reconnu")
+
+def newfonction(test_name):
+    """"""
+    return True
+def convert_units_df(df):
+    # Define the conversion logic for each parameter
+    df = df.withColumn("value", 
+                       F.when((F.col("parameter_name") == "co") & (F.col("unit") == "ppm"), F.col("value") * 1145.94)
+                        .when((F.col("parameter_name") == "co") & (F.col("unit") == "ppb"), F.col("value") * 1.14594)
+                        .when((F.col("parameter_name") == "no2") & (F.col("unit") == "ppm"), F.col("value") * 1912.87)
+                        .when((F.col("parameter_name") == "no2") & (F.col("unit") == "ppb"), F.col("value") * 1.91287)
+                        .when((F.col("parameter_name") == "so2") & (F.col("unit") == "ppm"), F.col("value") * 2620.8)
+                        .when((F.col("parameter_name") == "so2") & (F.col("unit") == "ppb"), F.col("value") * 2.6208)
+                        .when((F.col("parameter_name") == "o3") & (F.col("unit") == "ppb"), F.col("value") * 2.0)
+                        .when((F.col("parameter_name").startswith("pm")) & (F.col("unit") == "µg/m³"), F.col("value"))
+                        .when((F.col("parameter_name") == "pressure") & (F.col("unit") == "hpa"), F.col("value") * 100)
+                        .when((F.col("parameter_name") == "pressure") & (F.col("unit") == "mb"), F.col("value") * 100)
+                        .when((F.col("parameter_name") == "pressure") & (F.col("unit") == "pa"), F.col("value"))
+                        .when((F.col("parameter_name") == "temperature") & (F.col("unit") == "f"), (F.col("value") - 32) * 5/9)
+                        .when((F.col("parameter_name") == "temperature") & (F.col("unit") == "k"), F.col("value") - 273.15)
+                        .otherwise(F.col("value")))
+
+    # Update the units accordingly
+    df = df.withColumn("unit", 
+                       F.when(F.col("parameter_name").isin("co", "no2", "so2", "o3") & F.col("unit").isin("ppm", "ppb"), "µg/m³")
+                        .when((F.col("parameter_name") == "pressure") & F.col("unit").isin("hpa", "mb"), "Pa")
+                        .when((F.col("parameter_name") == "temperature") & F.col("unit").isin("f", "k", "c"), "°C")
+                        .otherwise(F.col("unit")))
+    
+    return df
+
 def clean_and_prepare_data(df):
+    # I have to use the conversion func to return the new value and the new unit and modify those values in my df data. 
     """
     Clean and prepare data for processing.
-
     Args:
         df (DataFrame): The input DataFrame containing the raw data.
-
     Returns:
         DataFrame: The cleaned and prepared DataFrame with the following columns:
             - measurement_id (string): The measurement ID.
@@ -40,29 +129,80 @@ def clean_and_prepare_data(df):
             - unit (string): The unit.
             - timestamp (datetime): The timestamp.
     """
-    df_exploded = df.withColumn("measurement", explode("measurements"))
+
+    # Explode the measurements array to create individual rows for each parameter
+    df_exploded = df.withColumn("measurement", F.explode("measurements"))
+
+    # Select and rename columns
     df_measurements = df_exploded.select(
-        col("_id.oid").alias("measurement_id"),
-        col("city"),
-        col("country"),
-        col("location").alias("location_name"),
-        col("coordinates.latitude").alias("latitude"),
-        col("coordinates.longitude").alias("longitude"),
-        col("measurement.parameter").alias("parameter_name"),
-        col("measurement.value").alias("value"),
-        col("measurement.unit").alias("unit"),
-        col("measurement.lastUpdated").alias("timestamp")
+        F.col("_id.oid").alias("measurement_id"),
+        F.col("city"),
+        F.col("country"),
+        F.col("location").alias("location_name"),
+        F.col("coordinates.latitude").alias("latitude"),
+        F.col("coordinates.longitude").alias("longitude"),
+        F.col("measurement.parameter").alias("parameter_name"),
+        F.col("measurement.value").alias("value"),
+        F.col("measurement.unit").alias("unit"),
+        F.col("measurement.lastUpdated").alias("timestamp")
     )
     
-    # Convert the parameter_name column to lowercase
-    df_measurements = df_measurements.withColumn("parameter_name", lower(col("parameter_name")))
     
+    # Convert parameter names to lowercase
+    df_measurements = df_measurements.withColumn("parameter_name", F.lower(F.col("parameter_name")))
+
+    df_measurements.show()
+
+    # Filtrer pour le paramètre 'pressure'
+    df_pressure = df_measurements.filter(col("parameter_name") == "pressure")
+
+    # Trouver la valeur maximale
+    max_pressure = df_pressure.agg(max("value").alias("max_value")).collect()[0]["max_value"]
+
+    print(f"La plus grande valeur pour le paramètre 'pressure' est : {max_pressure}")
+
+    df_measurements = convert_units_df(df_measurements)
+
+    # Filtrer les données pour le paramètre 'pressure'
+    df_pressure = df_measurements.filter(col("parameter_name") == "pressure")
+
+    # Définir les seuils min et max pour la pression
+    min_pressure_threshold = 87000
+    max_pressure_threshold = 108400
+
+    # Corriger les valeurs de pression en dehors des seuils
+    df_pressure_corrected = df_pressure.withColumn(
+        "corrected_value",
+        when(col("value") < min_pressure_threshold, min_pressure_threshold)
+        .when(col("value") > max_pressure_threshold, max_pressure_threshold)
+        .otherwise(col("value"))
+    )
+
+    # Joindre les données corrigées sur df_measurements
+    df_measurements = df_measurements.join(
+        df_pressure_corrected.select("measurement_id", "corrected_value"),
+        on="measurement_id",
+        how="left"
+    )
+
+    # Mettre à jour la colonne "value" pour les lignes où le parameter_name est "pressure"
+    df_measurements = df_measurements.withColumn(
+        "value",
+        when(col("parameter_name") == "pressure", col("corrected_value")).otherwise(col("value"))
+    ).drop("corrected_value")
+    
+    window_spec = Window.partitionBy("measurement_id", "parameter_name", "timestamp").orderBy("value")
+    df_measurements = df_measurements.withColumn("row_number", F.row_number().over(window_spec))
+    df_measurements = df_measurements.filter(F.col("row_number") == 1).drop("row_number")
+
+    df_measurements = df_measurements.repartition(100)
+
     return df_measurements
 
 def create_dimension_tables(df_measurements):
     """
-    A function to create dimension tables based on the input dataframe of measurements.
-    
+    Create dimension tables based on the input dataframe of measurements.
+
     Args:
     df_measurements (DataFrame): The input dataframe containing measurements.
 
@@ -71,98 +211,110 @@ def create_dimension_tables(df_measurements):
     DataFrame: df_parameter - A dataframe with parameter information.
     DataFrame: df_time - A dataframe with time information.
     """
+
+
+    # Create df_location
     df_location = df_measurements.select("location_name", "city", "country", "latitude", "longitude").distinct()
-    df_parameter = df_measurements.select("parameter_name","value", "unit").distinct()
+    df_location = df_location.withColumn("location_id", monotonically_increasing_id())
+    df_location = df_location.select("location_id", "location_name", "city", "country", "latitude", "longitude")
+
+    # Create df_parameter
+    df_parameter = df_measurements.select("parameter_name").distinct()
+    df_parameter = df_parameter.withColumn("parameter_id", monotonically_increasing_id())
+    df_parameter = df_parameter.select("parameter_id", "parameter_name")
+
+    # Create df_time
     df_time = df_measurements.select("timestamp").distinct() \
         .withColumn("year", year("timestamp")) \
         .withColumn("month", month("timestamp")) \
         .withColumn("day", dayofmonth("timestamp")) \
-        .withColumn("hour", hour("timestamp"))
+        .withColumn("hour", hour("timestamp")) \
+        .withColumn("time_id", monotonically_increasing_id())
+    df_time = df_time.select("time_id", "timestamp", "year", "month", "day", "hour")
+    
+    df_time = df_time.withColumn("timestamp", to_timestamp(col("timestamp"), "yyyy-MM-dd'T'HH:mm:ssXXX"))
+    # df_time = df_time.withColumn("timestamp", to_timestamp(col("timestamp"), "yyyy-MM-dd'T'HH:mm:ss"))
+
+    
     return df_location, df_parameter, df_time
+
+
+
+
+
 
 def create_fact_table(df_measurements, df_location, df_parameter, df_time):
     """
-    Create the fact table by joining dimension tables.
+    Create a fact table by joining dimension tables and measurements.
+    Args:
+    df_measurements (DataFrame): The input dataframe containing measurements.
+    df_location (DataFrame): The dataframe containing location dimensions.
+    df_parameter (DataFrame): The dataframe containing parameter dimensions.
+    df_time (DataFrame): The dataframe containing time dimensions.
+    Returns:
+    DataFrame: A dataframe representing the fact table.
     """
+    # Join df_measurements with dimension tables to get dimension IDs
     df_facts = df_measurements \
-        .join(df_location, ["location_name", "city", "country", "latitude", "longitude"], "inner") \
-        .join(df_parameter, ["parameter_name", "value", "unit"], "inner") \
-        .join(df_time, ["timestamp"], "inner")
-    
-    df_facts = df_facts.withColumnRenamed("location_name", "location_id") \
-        .withColumnRenamed("parameter_name", "parameter_id") \
-        .withColumnRenamed("timestamp", "time_id")
-    
-    df_facts = df_facts.select(
-        col("measurement_id"),
-        col("location_id"),
-        col("time_id"),
-        col("parameter_id"),
-        # col("value"),
-        # col("unit")
-    )
+        .join(df_location, 
+              (df_measurements.latitude == df_location.latitude) & 
+              (df_measurements.longitude == df_location.longitude), 
+              how='left') \
+        .join(df_parameter, df_measurements.parameter_name == df_parameter.parameter_name, how='left') \
+        .join(df_time, df_measurements.timestamp == df_time.timestamp, how='left') \
+        .select(
+            df_measurements.measurement_id,
+            df_location.location_id,
+            df_parameter.parameter_id,
+            df_time.time_id,
+            df_measurements.value,
+            df_measurements.unit
+        )
     
     return df_facts
 
+
+
+
 def calculate_daily_aggregates(df_measurements):
     """
-    Calculate the daily averages of measurements for each city, country, and parameter on a specific date.
-
+    Calculate daily averages of measurements for each city, country, and parameter.
+    
     Args:
-    df_measurements (DataFrame): The input dataframe containing measurements.
+        df_measurements (DataFrame): The input DataFrame containing the measurements.
 
     Returns:
-    DataFrame: The dataframe containing the daily average value of each parameter for each city and country.
+        DataFrame: A DataFrame containing the daily aggregates.
     """
-    df_daily_avg = df_measurements \
-        .withColumn("date", col("timestamp").cast("date")) \
-        .groupBy("city", "country", "parameter_name", "date") \
-        .agg(avg("value").alias("average_value"))
-    return df_daily_avg
+    df_daily = df_measurements.withColumn("date", F.to_date("timestamp"))
+    df_daily_aggregates = df_daily.groupBy("city", "country", "parameter_name", "date") \
+                                  .agg(F.avg("value").alias("average_value"))
 
-def calculate_seasonal_trends(df_measurements):
-    """
-    Calculate the average value of each parameter for each city and country
-    in each season for each year.
+    return df_daily_aggregates
 
-    Args:
-    df_measurements (DataFrame): The input dataframe containing measurements.
-
-    Returns:
-    DataFrame: The dataframe containing the average value of each parameter
-    for each city and country in each season for each year.
-    """
-    # Extract year and month from the timestamp column
-    # Rename the columns for simplicity
-    df_measurements = df_measurements \
-        .withColumn("year", year("timestamp")) \
-        .withColumn("month", month("timestamp"))
-
-    # Assign season to each measurement
-    # Winter: 12, 1, 2; Spring: 3, 4, 5; Summer: 6, 7, 8; Fall: 9, 10, 11
-    # Create a new column 'season' based on the month value
-    df_measurements = df_measurements.withColumn(
+def calculate_seasonal_trends(df):
+    # Extract year and month from the timestamp
+    df_with_date = df.withColumn("year", year(df["timestamp"])) \
+                     .withColumn("month", month(df["timestamp"]))
+    
+    # Define the season based on the month
+    df_with_season = df_with_date.withColumn(
         "season",
-        when(col("month").isin([12, 1, 2]), "Winter")
-        .when(col("month").isin([3, 4, 5]), "Spring")
-        .when(col("month").isin([6, 7, 8]), "Summer")
-        .otherwise("Fall")
+        when(df_with_date["month"].isin([12, 1, 2]), "Winter")
+        .when(df_with_date["month"].isin([3, 4, 5]), "Spring")
+        .when(df_with_date["month"].isin([6, 7, 8]), "Summer")
+        .when(df_with_date["month"].isin([9, 10, 11]), "Fall")
     )
-
-    # Calculate the average value of each parameter for each city and country
-    # in each season for each year
-    # Group by city, country, parameter, year, and season
-    # Calculate the average value of the 'value' column
-    # Rename the new column as 'average_value'
-    df_seasonal_avg = df_measurements \
-        .groupBy("city", "country", "parameter_name", "year", "season") \
-        .agg(avg("value").alias("average_value"))
-
-    return df_seasonal_avg
+    
+    # Group by city, country, parameter_name, year, and season, then calculate the average value
+    df_seasonal_trends = df_with_season.groupBy("city", "country", "parameter_name", "year", "season") \
+                                       .agg(avg("value").alias("average_value"))
+    
+    return df_seasonal_trends
 
 def create_tables_in_postgresql(engine):
     """
-    Crée les tables dans la base de données PostgreSQL en utilisant l'engine fourni.
+    Create the tables in PostgreSQL using the provided engine.
     """
     create_dimension_location_table = """
     CREATE TABLE IF NOT EXISTS dimension_location (
@@ -178,9 +330,7 @@ def create_tables_in_postgresql(engine):
     create_dimension_parameter_table = """
     CREATE TABLE IF NOT EXISTS dimension_parameter (
         parameter_id SERIAL PRIMARY KEY,
-        parameter_name VARCHAR(255),
-        value FLOAT,
-        unit VARCHAR(255)
+        parameter_name VARCHAR(255)
     );
     """
 
@@ -197,11 +347,12 @@ def create_tables_in_postgresql(engine):
 
     create_fact_table = """
     CREATE TABLE IF NOT EXISTS air_quality_measurements (
-        measurement_id VARCHAR(255),
+        measurement_id VARCHAR(255) PRIMARY KEY,
         location_id INT,
         time_id INT,
         parameter_id INT,
-        PRIMARY KEY (measurement_id),
+        value FLOAT,
+        unit VARCHAR(255),
         FOREIGN KEY (location_id) REFERENCES dimension_location (location_id),
         FOREIGN KEY (time_id) REFERENCES dimension_time (time_id),
         FOREIGN KEY (parameter_id) REFERENCES dimension_parameter (parameter_id)
@@ -237,7 +388,6 @@ def create_tables_in_postgresql(engine):
         connection.execute(text(create_daily_aggregates_table))
         connection.execute(text(create_seasonal_trends_table))
 
-
 def save_to_postgresql(df_location, df_parameter, df_time, df_facts, daily_avg, seasonal_avg):
     """
     Save the DataFrames to PostgreSQL.
@@ -255,9 +405,8 @@ def save_to_postgresql(df_location, df_parameter, df_time, df_facts, daily_avg, 
     df_parameter.write.jdbc(url=postgres_url, table="dimension_parameter", mode="overwrite", properties=postgres_properties)
     df_time.write.jdbc(url=postgres_url, table="dimension_time", mode="overwrite", properties=postgres_properties)
     df_facts.write.jdbc(url=postgres_url, table="air_quality_measurements", mode="overwrite", properties=postgres_properties)
-    daily_avg.write.jdbc(url=postgres_url, table="daily_avg_measurements", mode="overwrite", properties=postgres_properties)
-    seasonal_avg.write.jdbc(url=postgres_url, table="seasonal_avg_measurements", mode="overwrite", properties=postgres_properties)
-
+    daily_avg.write.jdbc(url=postgres_url, table="daily_aggregates", mode="overwrite", properties=postgres_properties)
+    seasonal_avg.write.jdbc(url=postgres_url, table="seasonal_trends", mode="overwrite", properties=postgres_properties)
 
 def main():
     spark = SparkSession.builder \
@@ -266,26 +415,26 @@ def main():
         .getOrCreate()
 
     df = read_data_from_mongodb(spark)
-    df.printSchema()
+    # df.printSchema()
 
     df_measurements = clean_and_prepare_data(df)
+    df_measurements.printSchema()
+    df_measurements.show()
     df_location, df_parameter, df_time = create_dimension_tables(df_measurements)
+    print("Shema df_time")
+    df_time.printSchema()
     df_facts = create_fact_table(df_measurements, df_location, df_parameter, df_time)
+    daily_avg = calculate_daily_aggregates(df_measurements)
+    seasonal_avg = calculate_seasonal_trends(df_measurements)
 
-    df_daily_avg = calculate_daily_aggregates(df_measurements)
-    df_seasonal_avg = calculate_seasonal_trends(df_measurements)
+    engine = create_engine("postgresql://admin:pass123@localhost:5432/air_quality")
 
-    # postgres_properties = {
-    #     "user": "admin",
-    #     "password": "pass123",
-    #     "driver": "org.postgresql.Driver"
-    # }
-    # postgres_url = "jdbc:postgresql://localhost:5432/air_quality"
-
-    engine = create_engine(f'postgresql+psycopg2://admin:pass123@localhost:5432/air_quality')
     create_tables_in_postgresql(engine)
-    save_to_postgresql(df_location, df_parameter, df_time, df_facts, df_daily_avg, df_seasonal_avg)
-    spark.stop()
+    save_to_postgresql(df_location, df_parameter, df_time, df_facts, daily_avg, seasonal_avg)
 
 if __name__ == "__main__":
     main()
+
+# ETL Khdam mais pb de conception architecture de BD dans postgreSQL. 
+# Dashboard grafana
+# Nzid Airflow pour l'automatisation
