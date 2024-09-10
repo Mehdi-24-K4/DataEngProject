@@ -9,7 +9,7 @@ sys.path.append('/opt/airflow/scripts')
 
 from producer import produce_air_quality_data
 from consumer import consume_and_store_data
-from testSpark import transform_store_postgreSQL
+from sparkTransformAndLoad import transform_store_postgreSQL
 
 # Configuration du DAG
 default_args = {
