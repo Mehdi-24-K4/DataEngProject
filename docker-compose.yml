@@ -22,6 +22,11 @@ services:
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
     networks:
       - my-network
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "9092"]
+      interval: 10s
+      retries: 3
+      start_period: 30s
 
   schema-registry:
     image: confluentinc/cp-schema-registry:5.5.3
@@ -34,6 +39,11 @@ services:
     depends_on: [zookeeper, kafka]
     networks:
       - my-network
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8081/subjects"]
+      interval: 10s
+      retries: 3
+      start_period: 30s
 
   mongodb:
     image: mongo:latest
@@ -66,8 +76,8 @@ services:
     environment:
       - SPARK_MODE=worker
       - SPARK_MASTER_URL=spark://spark-master:7077
-      - SPARK_WORKER_MEMORY=2G
-      - SPARK_WORKER_CORES=2
+      - SPARK_WORKER_MEMORY=8G
+      - SPARK_WORKER_CORES=8
       - SPARK_WORKER_PORT=8081
       - SPARK_DRIVER_EXTRA_JAVA_OPTIONS=-Dspark.rpc.message.maxSize=256
       - SPARK_EXECUTOR_EXTRA_JAVA_OPTIONS=-Dspark.rpc.message.maxSize=256
@@ -106,6 +116,81 @@ services:
       - postgres
     networks:
       - my-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin"]
+      interval: 10s
+      retries: 3
+      start_period: 30s
+
+  airflow-webserver:
+    image: apache/airflow:2.7.1
+    container_name: airflow-webserver
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      - postgres
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__FERNET_KEY=8kHA2EfmUeiZKfNFYPtCosxU_8RL5bSonZzQPvEIbYY=
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://admin:pass123@postgres/airflow
+      - AIRFLOW__WEBSERVER__RBAC=True
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      # - AIRFLOW__WEBSERVER__SECRET_KEY=your_secret_key_here
+      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=True
+      - PGPASSWORD=pass123   # Ajout du mot de passe ici
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./requirements.txt:/opt/airflow/requirements.txt
+      - ./scripts:/opt/airflow/scripts
+    ports:
+      - "8084:8080"
+    networks:
+      - my-network
+    user: "50000:50000"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    entrypoint: >
+      bash -c "
+      pip install --upgrade pip &&
+      pip install --no-cache-dir -r /opt/airflow/requirements.txt &&
+      psql -h postgres -U admin -d postgres -c \"SELECT 1 FROM pg_database WHERE datname = 'airflow'\" | grep -q 1 || psql -h postgres -U admin -d postgres -c \"CREATE DATABASE airflow\" &&
+      airflow db init &&
+      airflow users create --username admin --password pass123 --firstname Admin --lastname User --role Admin --email admin@example.com &&
+      airflow webserver
+      "
+
+  airflow-scheduler:
+    image: apache/airflow:2.7.1
+    container_name: airflow-scheduler
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      - airflow-webserver
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__FERNET_KEY=8kHA2EfmUeiZKfNFYPtCosxU_8RL5bSonZzQPvEIbYY=
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://admin:pass123@postgres/airflow
+      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=True
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./requirements.txt:/opt/airflow/requirements.txt
+      - ./scripts:/opt/airflow/scripts
+    networks:
+      - my-network
+    user: "50000:50000"
+    entrypoint: >
+      bash -c "
+      pip install --upgrade pip &&
+      pip install --no-cache-dir -r /opt/airflow/requirements.txt &&
+      airflow scheduler
+      "
 
 volumes:
   mongo-data:

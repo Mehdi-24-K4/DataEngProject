@@ -1,0 +1,9 @@
+Message={"location": "CENTENARIO", "city": "Buenos Aires", "country": "AR", "coordinates": {"latitude": -34.60638, "longitude": -58.43194}, 
+"measurements": [{"parameter": "co", "value": 0.39, "lastUpdated": "2024-08-31T03:00:00+00:00", "unit": "ppm"}, 
+{"parameter": "no2", "value": 0.0, "lastUpdated": "2024-08-31T03:00:00+00:00", "unit": "ppm"}, 
+{"parameter": "pm10", "value": 17.0, "lastUpdated": "2024-08-31T03:00:00+00:00", "unit": "\u00b5g/m\u00b3"}]}
+
+Message={"location": "CENTENARIO", "city": "Buenos Aires", "country": "AR", "coordinates": {"latitude": -34.60638, "longitude": -58.43194},
+ "measurements": [{"parameter": "co", "value": 0.39, "lastUpdated": "2024-08-31T03:00:00+00:00", "unit": "ppm"}, 
+ {"parameter": "no2", "value": 0.0, "lastUpdated": "2024-08-31T03:00:00+00:00", "unit": "ppm"}, 
+ {"parameter": "pm10", "value": 17.0, "lastUpdated": "2024-08-31T03:00:00+00:00", "unit": "\u00b5g/m\u00b3"}]}

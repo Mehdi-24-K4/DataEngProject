@@ -1,7 +1,7 @@
 import requests
 import json
 from confluent_kafka import Producer
-from constantes import API_URL, KAFKA_BROKER, KAFKA_TOPIC, MAX_LIMIT
+from constantes import API_URL, KAFKA_BROKER, KAFKA_TOPIC, MAX_LIMIT, API_KEY
 import time
 
 def fetch_air_quality_data():
@@ -15,10 +15,16 @@ def fetch_air_quality_data():
         'sort': 'desc',
         'has_geo': 'true'
     }
+
+    headers = {
+        'x-api-key': API_KEY
+    }
     try:
-        response = requests.get(API_URL, params=params)
+        response = requests.get(API_URL, params=params, headers=headers)
         response.raise_for_status()
-        return response.json().get('results', [])
+        data = response.json().get('results', [])
+        print(f"Fetched {len(data)} records from API.")  # Log the number of records 100
+        return data
     except requests.RequestException as e:
         print(f"Erreur lors de la récupération des données: {e}")
         return []
@@ -64,27 +70,24 @@ def delivery_report(err, msg):
     else:
         print('Message delivered to {} [{}]'.format(msg.topic(), msg.partition()))
 
-def main():
+def produce_air_quality_data():
+    """
+    Fetch air quality data and send it to Kafka.
+    This function is designed to be used as a task in an Airflow DAG.
+    """
     producer = getProducer()
-    try:
-        while True:
-            data = fetch_air_quality_data()
-            if data:
-                for item in data:
-                    try:
-                        producer.produce(KAFKA_TOPIC, json.dumps(item).encode('utf-8'), callback=delivery_report)
-                        producer.poll(1)  # Attendre que le message soit livré
-                    except Exception as e:
-                        print(f'Failed to produce message: {e}')
-                print("Données envoyées à Kafka")
-            else:
-                print("Pas de données sélectionnées.")
-            print("Attente de 5 minutes avant le prochain appel.")
-            time.sleep(300)  # Fetch data every 5 minutes
-    except KeyboardInterrupt:
-        producer.flush()
-        print("Fin d'envois des données à Kafka")
-        print("Interruption par l'utilisateur.")
-
-if __name__ == "__main__":
-    main()
+    data = fetch_air_quality_data()
+    
+    if data:
+        for item in data:
+            try:
+                producer.produce(KAFKA_TOPIC, json.dumps(item).encode('utf-8'), callback=delivery_report)
+                producer.poll(1)  # Wait for the message to be delivered
+            except Exception as e:
+                print(f'Failed to produce message: {e}')
+        print("Données envoyées à Kafka")
+    else:
+        print("Pas de données sélectionnées.")
+    
+    producer.flush()
+    print("Envois des données terminé.")

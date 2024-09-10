@@ -6,6 +6,15 @@ air_quality_env/
 # Ignore all __pycache__ directories
 **/__pycache__/
 
+# Ignore all CSV files in the project
+*.csv
+
 # Ignore specific files
-testPostgresql.py
-transformations.py
+UnitsDoc.txt
+dataVerification.txt
+.dockerignore
+
+# Ignore specific directories in the root of the project
+test/
+plugins/
+logs/
