@@ -35,8 +35,9 @@ MONGO_COLLECTION = 'raw_data'
 """
 The name of the MongoDB collection where we will store the real-time data
 """
+NUMBER_OF_PAGES = 2  # Nombre total de pages à consommer
 
-KAFKA_DATA_LENGTH = 100
+KAFKA_DATA_LENGTH = 100*NUMBER_OF_PAGES
 
 
 JAR_PATH = "C:/Users/amine/OneDrive/Bureau/ProjetDataEngMehdi/pilotes/postgresql-42.7.3.jar"

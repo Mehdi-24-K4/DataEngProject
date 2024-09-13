@@ -4,26 +4,27 @@ from confluent_kafka import Producer
 from constantes import API_URL, KAFKA_BROKER, KAFKA_TOPIC, MAX_LIMIT, API_KEY
 import time
 
-def fetch_air_quality_data():
+def fetch_air_quality_data(page=1):
     """
     Fetches air quality data from an API.
     Returns a list of results or an empty list if an error occurs.
     """
     params = {
         'limit': MAX_LIMIT,
-        'page': 1,
+        'page': page,
         'sort': 'desc',
         'has_geo': 'true'
     }
 
     headers = {
-        'x-api-key': API_KEY
+        'x-api-key': API_KEY, 
+        "Cache-Control": "no-cache",
     }
     try:
         response = requests.get(API_URL, params=params, headers=headers)
         response.raise_for_status()
         data = response.json().get('results', [])
-        print(f"Fetched {len(data)} records from API.")  # Log the number of records 100
+        print(f"Fetched {len(data)} records from page {page}.")  # Log the number of records and page number
         return data
     except requests.RequestException as e:
         print(f"Erreur lors de la récupération des données: {e}")
@@ -76,18 +77,18 @@ def produce_air_quality_data():
     This function is designed to be used as a task in an Airflow DAG.
     """
     producer = getProducer()
-    data = fetch_air_quality_data()
+    for page in (1,2):
+        data = fetch_air_quality_data()
     
-    if data:
-        for item in data:
-            try:
-                producer.produce(KAFKA_TOPIC, json.dumps(item).encode('utf-8'), callback=delivery_report)
-                producer.poll(1)  # Wait for the message to be delivered
-            except Exception as e:
-                print(f'Failed to produce message: {e}')
-        print("Données envoyées à Kafka")
-    else:
-        print("Pas de données sélectionnées.")
-    
+        if data:
+            for item in data:
+                try:
+                    producer.produce(KAFKA_TOPIC, json.dumps(item).encode('utf-8'), callback=delivery_report)
+                    producer.poll(1)  # Wait for the message to be delivered
+                except Exception as e:
+                    print(f'Failed to produce message: {e}')
+            print(f"Données de la page {page} envoyées à Kafka")
+        else:
+            print(f"Données de la page {page} envoyées à Kafka")
     producer.flush()
     print("Envois des données terminé.")

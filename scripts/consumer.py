@@ -1,7 +1,8 @@
 import json
-from pymongo import MongoClient
+from pymongo import MongoClient, InsertOne
 from confluent_kafka import Consumer, KafkaException
 from constantes import KAFKA_BROKER, KAFKA_TOPIC, MONGO_URI, MONGO_DB, MONGO_COLLECTION, KAFKA_DATA_LENGTH
+import copy
 
 def get_consumer():
     """
@@ -56,7 +57,7 @@ def connect_mongodb():
     db = client[db_name]
     collection = db[MONGO_COLLECTION]
 
-    # Mettre à jour tous les documents qui n'ont pas le champ 'processed'
+    # # Mettre à jour tous les documents qui n'ont pas le champ 'processed'
     collection.update_many(
         {"processed": {"$exists": False}},
         {"$set": {"processed": False}}
@@ -64,20 +65,33 @@ def connect_mongodb():
     # Return the MongoDB database
     return client[db_name]
 
+
+def normalize_data(data):
+    """ Normalise les données pour une comparaison cohérente """
+    # Faire une copie des données pour ne pas altérer les originaux
+    normalized_data = copy.deepcopy(data)
+    
+    # Trier les mesures par le paramètre 'parameter' pour garantir une comparaison ordonnée
+    if 'measurements' in normalized_data:
+        normalized_data['measurements'] = sorted(normalized_data['measurements'], key=lambda x: x['parameter'])
+    
+    return normalized_data
+
+
+
 def consume_and_store_data():
     consumer = get_consumer()
     db = connect_mongodb()
+    collection = db[MONGO_COLLECTION]
 
     try:
         messages_processed = 0
-        # Consomme un certain nombre de messages (par exemple, 100 messages à la fois)
-        for _ in range(KAFKA_DATA_LENGTH):  # ou ajuster le nombre selon vos besoins
-            msg = consumer.poll(timeout=1000.0)  # Réduit le timeout pour une consommation rapide
+        bulk_operations = []
 
+        while messages_processed < KAFKA_DATA_LENGTH:
+            msg = consumer.poll(timeout=1000.0)
             if msg is None:
-                print('No new messages.')
-                break  # Sortir de la boucle si aucun message
-
+                continue  # Continuez à attendre des messages
             if msg.error():
                 if msg.error().code() == KafkaException._PARTITION_EOF:
                     print('End of partition reached {}/{}'.format(msg.topic(), msg.partition()))
@@ -85,13 +99,47 @@ def consume_and_store_data():
                     raise KafkaException(msg.error())
             else:
                 data = json.loads(msg.value().decode('utf-8'))
-
-                # Ajoute la colonne 'processed' et la définit à False
                 data['processed'] = False
+                # Créez un filtre qui correspond exactement à tous les champs du message
+                filter_doc = {
+                    "location": data["location"],
+                    "city": data["city"],
+                    "country": data["country"],
+                    "coordinates": data["coordinates"],
+                    "measurements": {
+                        "$all": [
+                            {
+                                "$elemMatch": {
+                                    "parameter": m["parameter"],
+                                    "value": m["value"],
+                                    "lastUpdated": m["lastUpdated"],
+                                    "unit": m["unit"]
+                                }
+                            } for m in data["measurements"]
+                        ]
+                    }
+                }
 
-                db[MONGO_COLLECTION].insert_one(data)
+                # Vérifiez si un document exactement identique existe déjà
+                existing_doc = collection.find_one(filter_doc)
+
+                if existing_doc is None:
+                    # Le document n'existe pas, préparez l'opération d'insertion
+                    operation = InsertOne(data)
+                    bulk_operations.append(operation)
+                    print(f"New document prepared for insertion: {data}")
+                else:
+                    print(f"Exact document already exists for location: {data}, skipping insertion.")
+
                 messages_processed += 1
-                print("Data inserted into the MongoDB database.")
+
+                # Exécutez les opérations en bloc toutes les 100 messages ou à la fin
+                if len(bulk_operations) >= 100 or messages_processed == KAFKA_DATA_LENGTH:
+                    if bulk_operations:
+                        result = collection.bulk_write(bulk_operations)
+                        print(f"Inserted: {result.inserted_count}")
+                    bulk_operations = []
+
         print(f"Total messages processed: {messages_processed}")
     except Exception as e:
         print(f"An error occurred: {e}")

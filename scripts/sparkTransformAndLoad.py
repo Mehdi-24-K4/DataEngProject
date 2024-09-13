@@ -19,11 +19,16 @@ def mark_data_as_processed():
         db = client[MONGO_DB]
         collection = db[MONGO_COLLECTION]
         
+        # Log avant la mise à jour pour voir combien de documents ne sont pas encore traités
+        unprocessed_count = collection.count_documents({"processed": {"$ne": False}})
+        print(f"Documents not marked as processed: {unprocessed_count}")
+
         # Mise à jour de tous les documents dans la collection
-        result = collection.update_many({}, {"$set": {"processed": True}})
+        result = collection.update_many({"processed": {"$ne": True}}, {"$set": {"processed": True}})
         
-        # Afficher le nombre de documents mis à jour
+        # Log après la mise à jour
         print(f"Marked {result.modified_count} documents as processed in MongoDB.")
+
 
     except Exception as e:
         print(f"Error marking data as processed: {e}")
@@ -53,14 +58,17 @@ def read_data_from_mongodb(spark_session):
             .load()
         
         # Filtrer pour obtenir uniquement les données non traitées
-        data_frame = data_frame.filter(col("processed") == False)
-
+        df = data_frame.filter(col("processed") == False)
+        data_frame2 = data_frame.filter(col("processed") == True)
         # Afficher un échantillon des données pour vérification
-        # data_frame.show()
+        print("data_frame2 for processed data")
+        data_frame2.show()
+        print("data_frame for unprocessed data")
+        df.show()
         # Repartir les données pour une meilleure performance si nécessaire
-        data_frame = data_frame.repartition(10)
+        df = df.repartition(10)
 
-        return data_frame
+        return df
 
     except Exception as e:
         print(f"Error reading data from MongoDB: {e}")
@@ -308,8 +316,6 @@ def filter_and_reassign_ids(df_location: DataFrame, df_parameter: DataFrame, df_
 
 
     # Filtrage des doublons pour df_time
-    # Assure-toi que le format de timestamp est cohérent
-    # df_time = df_time.withColumn("timestamp_str", F.col("timestamp").cast("string"))
     df_time = df_time.filter(~F.col("timestamp").isin(existing_times))
 
 
@@ -460,11 +466,6 @@ def delete_existed_dimension(df_location, df_time, df_parameter, engine, spark):
     parameters = spark.createDataFrame(existing_parameters, parameter_schema)
     times = spark.createDataFrame(existing_times, time_schema)
 
-    # Persister les DataFrames existants si nécessaire (pour les réutiliser efficacement)
-    # locations.persist()
-    # parameters.persist()
-    # times.persist()
-
     # Filtrer les lignes de df_location, df_parameter et df_time
     df_location_filtered = df_location.join(locations, on="location_id", how="left_anti")
     df_parameter_filtered = df_parameter.join(parameters, on="parameter_id", how="left_anti")
@@ -476,66 +477,57 @@ def delete_existed_dimension(df_location, df_time, df_parameter, engine, spark):
     print(f"Nombre de lignes avant filtrage (time): {df_time.count()}, après filtrage: {df_time_filtered.count()}")
 
     return df_location_filtered, df_time_filtered, df_parameter_filtered
-    # finally:
-        # Optionnel : nettoyer les DataFrames persistés
-        # locations.unpersist()
-        # parameters.unpersist()
-        # times.unpersist()
 
 def save_to_postgresql(df_location, df_parameter, df_time, df_facts, engine):
     """
     Save data to PostgreSQL database with row-level locks.
-    """
-    if df_location.rdd.isEmpty():
-        print("location empty")
-    elif df_parameter.rdd.isEmpty():
-        print("df_parameter empty")
-    elif df_time.rdd.isEmpty():
-        print("df_time empty")
-    elif df_facts.rdd.isEmpty():
-        print("df_facts empty")
-        
-    df_location_pd = df_location.toPandas()
-    df_parameter_pd = df_parameter.toPandas()
-    df_time_pd = df_time.toPandas()
-    df_facts_pd = df_facts.toPandas()
+    """ 
+    #Merge dataframe with table
+    df_location_pd = df_location.toPandas() if not df_location.rdd.isEmpty() else pd.DataFrame()
+    df_parameter_pd = df_parameter.toPandas() if not df_parameter.rdd.isEmpty() else pd.DataFrame()
+    df_time_pd = df_time.toPandas() if not df_time.rdd.isEmpty() else pd.DataFrame()
+    df_facts_pd = df_facts.toPandas() if not df_facts.rdd.isEmpty() else pd.DataFrame()
 
     with engine.connect() as conn:
         trans = conn.begin()  # Démarre une transaction
         try:
-            # Insertion des dimensions avec verrouillage des lignes spécifiques
-            for table_name, df in [
-                ('dimension_location', df_location_pd),
-                ('dimension_parameter', df_parameter_pd),
-                ('dimension_time', df_time_pd)
-            ]:
-                df.to_sql(table_name, conn, if_exists='append', index=False)
+            # Insertion des dimensions
+            if not df_location_pd.empty:
+                df_location_pd.to_sql('dimension_location', conn, if_exists='append', index=False)
 
-            # Pour chaque mesure, verrouillez la ligne avant de l'insérer ou la mettre à jour
-            for index, row in df_facts_pd.iterrows():
-                conn.execute(text("""
-                    SELECT * FROM air_quality_measurements 
-                    WHERE measurement_id = :measurement_id FOR UPDATE
-                """), {'measurement_id': row['measurement_id']})
-                
-                conn.execute(text("""
-                    INSERT INTO air_quality_measurements (measurement_id, location_id, parameter_id, time_id, value, unit)
-                    VALUES (:measurement_id, :location_id, :parameter_id, :time_id, :value, :unit)
-                    ON CONFLICT (measurement_id) 
-                    DO UPDATE SET 
-                        location_id = EXCLUDED.location_id,
-                        parameter_id = EXCLUDED.parameter_id,
-                        time_id = EXCLUDED.time_id,
-                        value = EXCLUDED.value,
-                        unit = EXCLUDED.unit
-                """), {
-                    'measurement_id': row['measurement_id'],
-                    'location_id': row['location_id'],
-                    'parameter_id': row['parameter_id'],
-                    'time_id': row['time_id'],
-                    'value': row['value'],
-                    'unit': row['unit']
-                })
+            if not df_parameter_pd.empty:
+                df_parameter_pd.to_sql('dimension_parameter', conn, if_exists='append', index=False)
+
+            if not df_time_pd.empty:
+                df_time_pd.to_sql('dimension_time', conn, if_exists='append', index=False)
+
+            # Insertion des faits avec verrouillage des lignes spécifiques
+            if not df_facts_pd.empty:
+                # Pour chaque mesure, verrouillez la ligne avant de l'insérer ou la mettre à jour
+                for index, row in df_facts_pd.iterrows():
+                    conn.execute(text("""
+                        SELECT * FROM air_quality_measurements 
+                        WHERE measurement_id = :measurement_id FOR UPDATE
+                    """), {'measurement_id': row['measurement_id']})
+                    
+                    conn.execute(text("""
+                        INSERT INTO air_quality_measurements (measurement_id, location_id, parameter_id, time_id, value, unit)
+                        VALUES (:measurement_id, :location_id, :parameter_id, :time_id, :value, :unit)
+                        ON CONFLICT (measurement_id) 
+                        DO UPDATE SET 
+                            location_id = EXCLUDED.location_id,
+                            parameter_id = EXCLUDED.parameter_id,
+                            time_id = EXCLUDED.time_id,
+                            value = EXCLUDED.value,
+                            unit = EXCLUDED.unit
+                    """), {
+                        'measurement_id': row['measurement_id'],
+                        'location_id': row['location_id'],
+                        'parameter_id': row['parameter_id'],
+                        'time_id': row['time_id'],
+                        'value': row['value'],
+                        'unit': row['unit']
+                    })
 
             trans.commit()  # Valide la transaction
         except Exception as e:
@@ -578,8 +570,8 @@ def update_dimension_ids(df, engine, table_name, key_columns, id_column, spark):
     # Récupérer les ID existants de la base de données
     with engine.connect() as conn:
         existing_data = pd.read_sql(f"SELECT {', '.join(key_columns)}, {id_column} FROM {table_name}", conn)
-        print('existing_data')
-        print(existing_data.head())
+        # print('existing_data')
+        # print(existing_data.head())
 
     if key_columns==['timestamp']:
         # Define the schema for the existing DataFrame
@@ -703,119 +695,78 @@ def transform_store_postgreSQL():
     spark = SparkSession.builder \
         .appName("Air Quality Data Processing") \
         .config("spark.jars.packages", "org.mongodb.spark:mongo-spark-connector_2.12:3.0.1,org.postgresql:postgresql:42.2.18") \
+        .config("spark.network.timeout", "800s") \
+        .config("spark.executor.heartbeatInterval", "60s") \
         .getOrCreate()
     spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "true")
     try:
-        engine = create_engine("postgresql+psycopg2://admin:pass123@postgres:5432/air_quality")
-        create_tables_in_postgresql(engine)
 
         df = read_data_from_mongodb(spark)
+        if not df.rdd.isEmpty():
+            engine = create_engine("postgresql+psycopg2://admin:pass123@postgres:5432/air_quality")
+            create_tables_in_postgresql(engine)
+            df_measurements = clean_and_prepare_data(df)
+            # df_measurements.show(5)
+            df_location, df_parameter, df_time = create_dimension_tables(df_measurements, engine)
 
-        df_measurements = clean_and_prepare_data(df)
-        
-        print("df_measurements schema:")
-        df_measurements.printSchema()
-        print("df_measurements sample:")
-        df_measurements.show(5)
+            if df_time.isEmpty():
+                print("df_time est vide ici.")  
 
-        df_location, df_parameter, df_time = create_dimension_tables(df_measurements, engine)
+            # Récupérer les ID existants et attribuer de nouveaux ID aux nouvelles dimensions
+            df_location = update_dimension_ids(df_location, engine, 'dimension_location', ['latitude', 'longitude'], 'location_id', spark)
+            df_parameter = update_dimension_ids(df_parameter, engine, 'dimension_parameter', ['parameter_name'], 'parameter_id', spark)
 
-        if df_time.isEmpty():
-            print("df_time est vide ici.")  
+            df_time = df_time.withColumn("timestamp", col("timestamp").cast(TimestampType()))
 
-        # Récupérer les ID existants et attribuer de nouveaux ID aux nouvelles dimensions
-        df_location = update_dimension_ids(df_location, engine, 'dimension_location', ['latitude', 'longitude'], 'location_id', spark)
-        df_parameter = update_dimension_ids(df_parameter, engine, 'dimension_parameter', ['parameter_name'], 'parameter_id', spark)
-        print("df_time before update")
-        df_time = df_time.withColumn("timestamp", col("timestamp").cast(TimestampType()))
-        print("df_time schema and sample:")
-        print(type(df_time))
-        df_time.printSchema()
-        df_time.show()
-        df_time = update_dimension_ids(df_time, engine, 'dimension_time', ['timestamp'], 'time_id', spark)
-
-
-        # data_exist=False
-        # with engine.connect() as conn:
-        #     existing_data = pd.read_sql(f"SELECT * from air_quality_measurements", conn)
-        #     if not existing_data.empty:
-        #         data_exist = True
-        # if (data_exist):
-        #     df_measurements_to_write = df_measurements.coalesce(1)
-        #     df_measurements_to_write.write.csv("/opt/airflow/scripts/DataSecondApiCall.csv", header=True, mode="overwrite")
-        # else:
-        #     df_measurements_to_write = df_measurements.coalesce(1)
-        #     df_measurements_to_write.write.csv("/opt/airflow/scripts/DataFirstApiCall.csv", header=True, mode="overwrite")
-        print("After update_dimension_ids:")
-        if df_time.rdd.isEmpty():
-            print("df_time est vide ici.")
-        print("df_time schema and sample:")
-        df_time.printSchema()
-        df_time.show()
-        # Créer des dictionnaires de mappage pour chaque dimension
-        try:
-            location_map = create_mapping_dict(df_location, ["latitude", "longitude"], "location_id")
-            print("Location map created successfully:", location_map)
-        except Exception as e:
-            print("Error in creating location_map:", e)
-        
-        try:
-            parameter_map = create_mapping_dict(df_parameter, "parameter_name", "parameter_id")
-            print("Parameter map created successfully:", parameter_map)
-        except Exception as e:
-            print("Error in creating parameter_map:", e)
-        if df_time.isEmpty():
-            print("df_time est vide ici.")
-        try:
-            df_time = df_time.withColumn("timestamp_str", F.date_format(F.col("timestamp"), "yyyy-MM-dd HH:mm:ss"))
-            time_map = create_mapping_dict(df_time, "timestamp_str", "time_id")
-            df_time = df_time.drop("timestamp_str")
-            print("Time map created successfully:", time_map)
-        except Exception as e:
-            print(f"Error in creating time_map:", e)
+            df_time = update_dimension_ids(df_time, engine, 'dimension_time', ['timestamp'], 'time_id', spark)
+            if df_time.rdd.isEmpty():
+                print("df_time est vide ici.")
+            # Créer des dictionnaires de mappage pour chaque dimension
+            try:
+                location_map = create_mapping_dict(df_location, ["latitude", "longitude"], "location_id")
+                print("Location map created successfully")
+            except Exception as e:
+                print("Error in creating location_map:", e)
+            
+            try:
+                parameter_map = create_mapping_dict(df_parameter, "parameter_name", "parameter_id")
+                print("Parameter map created successfully")
+            except Exception as e:
+                print("Error in creating parameter_map:", e)
+            if df_time.isEmpty():
+                print("df_time est vide ici.")
+            try:
+                df_time = df_time.withColumn("timestamp_str", F.date_format(F.col("timestamp"), "yyyy-MM-dd HH:mm:ss"))
+                time_map = create_mapping_dict(df_time, "timestamp_str", "time_id")
+                df_time = df_time.drop("timestamp_str")
+                print("Time map created successfully")
+            except Exception as e:
+                print(f"Error in creating time_map:", e)
 
 
-        # Créer la table de faits en utilisant les mappings
-        df_facts = create_fact_table_with_mappings(df_measurements, location_map, parameter_map, time_map, spark)
-        df_facts = df_facts.coalesce(5)
-        df_facts.show()
-        print("dimensions before marking data")
-        df_location.show()
-        df_parameter.show()
-        df_time.show()
-
-        # mark_data_as_processed()
-        # spark.catalog.clearCache()
-        print("dimensions after marking data")
-        df_location.show()
-        df_parameter.show()
-        df_time.show()
-
-        try:
-            print("dimensions before filtering existed data")
-            df_location.show()
-            df_time.show()
-            df_parameter.show()
-
-            df_location, df_time, df_parameter = delete_existed_dimension(df_location, df_time, df_parameter, engine, spark)
-        except Exception as e:
-            print(f"Erreur de requête de la base de données :", e)
-        # print("dimensions to save")
-        # df_location.show()
-        # df_time.show()
-        # df_parameter.show()
-        # print("fact to save")
-        # df_facts.show()
-        try:
-            save_to_postgresql(df_location, df_parameter, df_time, df_facts, engine)
-            # mark_data_as_processed()
-        except Exception as e:
-            print(f"Error saving to PostgreSQL: {e}")
-            raise e
-        finally:
-            mark_data_as_processed()
-            print("fermeture de l'engin")
-            engine.dispose()
+            # Créer la table de faits en utilisant les mappings
+            df_facts = create_fact_table_with_mappings(df_measurements, location_map, parameter_map, time_map, spark)
+            df_facts = df_facts.coalesce(5)
+            try:
+                df_location, df_time, df_parameter = delete_existed_dimension(df_location, df_time, df_parameter, engine, spark)
+            except Exception as e:
+                print(f"Erreur de requête de la base de données :", e)
+            try:
+                save_to_postgresql(df_location, df_parameter, df_time, df_facts, engine)
+                # mark_data_as_processed()
+            except Exception as e:
+                print(f"Error saving to PostgreSQL: {e}")
+                raise e
+            try:
+                mark_data_as_processed()
+            except Exception as e:
+                print(f"Error marking data in MongoDB: {e}")
+                raise e
+            finally:
+                print("fermeture de l'engin")
+                engine.dispose()
+        else:
+            print("No new data from the API.")        
     finally:
         spark.catalog.clearCache()
         spark.stop()

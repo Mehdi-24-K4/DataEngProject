@@ -76,7 +76,7 @@ services:
     environment:
       - SPARK_MODE=worker
       - SPARK_MASTER_URL=spark://spark-master:7077
-      - SPARK_WORKER_MEMORY=8G
+      - SPARK_WORKER_MEMORY=16G
       - SPARK_WORKER_CORES=8
       - SPARK_WORKER_PORT=8081
       - SPARK_DRIVER_EXTRA_JAVA_OPTIONS=-Dspark.rpc.message.maxSize=256
