@@ -35,13 +35,7 @@ Le projet est composé de plusieurs scripts Python pour gérer différentes éta
     cd repository
     ```
 
-2. **Construisez l'image Docker** :
-    Assurez-vous que votre Dockerfile est configuré correctement, puis construisez l'image Docker :
-    ```bash
-    docker build -t air_quality_etl .
-    ```
-
-3. **Démarrez les conteneurs Docker** :
+2. **Démarrez les conteneurs Docker** :
     Utilisez Docker Compose pour démarrer les services nécessaires :
     ```bash
     docker-compose up --build
