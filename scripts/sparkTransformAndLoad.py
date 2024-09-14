@@ -13,14 +13,15 @@ def mark_data_as_processed():
     """
     Updates the 'processed' field to True for all documents in MongoDB.
     """
+    client = None
     try:
-        # Étape 3 : Se connecter à MongoDB via pymongo
+        # Se connecter à MongoDB via pymongo
         client = MongoClient(MONGO_URI)
         db = client[MONGO_DB]
         collection = db[MONGO_COLLECTION]
         
         # Log avant la mise à jour pour voir combien de documents ne sont pas encore traités
-        unprocessed_count = collection.count_documents({"processed": {"$ne": False}})
+        unprocessed_count = collection.count_documents({"processed": {"$ne": True}})
         print(f"Documents not marked as processed: {unprocessed_count}")
 
         # Mise à jour de tous les documents dans la collection
@@ -35,7 +36,8 @@ def mark_data_as_processed():
 
     finally:
         # Assure la fermeture de la connexion
-        client.close()
+        if client:
+            client.close()
 
     
 def read_data_from_mongodb(spark_session):
@@ -167,9 +169,9 @@ def clean_and_prepare_data(df):
         when(col("parameter_name") == "pressure", col("corrected_value")).otherwise(col("value"))
     ).drop("corrected_value")
     
-    window_spec = Window.partitionBy("measurement_id", "parameter_name", "timestamp").orderBy("value")
-    df_measurements = df_measurements.withColumn("row_number", F.row_number().over(window_spec))
-    df_measurements = df_measurements.filter(F.col("row_number") == 1).drop("row_number")
+    # window_spec = Window.partitionBy("measurement_id", "parameter_name", "timestamp").orderBy("value")
+    # df_measurements = df_measurements.withColumn("row_number", F.row_number().over(window_spec))
+    # df_measurements = df_measurements.filter(F.col("row_number") == 1).drop("row_number")
 
     df_measurements = df_measurements.repartition(10)
 
@@ -763,7 +765,12 @@ def transform_store_postgreSQL():
                 print("fermeture de l'engin")
                 engine.dispose()
         else:
-            print("No new data from the API.")        
+            print("No new data from the API.")
+            try:
+                mark_data_as_processed()
+            except Exception as e:
+                print(f"Error marking data in MongoDB: {e}")
+                raise e        
     finally:
         spark.catalog.clearCache()
         spark.stop()
