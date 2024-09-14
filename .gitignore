@@ -13,7 +13,7 @@ air_quality_env/
 UnitsDoc.txt
 dataVerification.txt
 .dockerignore
-
+API_msg_format.json
 # Ignore specific directories in the root of the project
 test/
 plugins/
