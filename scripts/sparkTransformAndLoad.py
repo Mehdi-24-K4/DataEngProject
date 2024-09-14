@@ -299,7 +299,6 @@ def filter_and_reassign_ids(df_location: DataFrame, df_parameter: DataFrame, df_
     df_location = df_location.drop("lat_long")
 
     # Réassignation des identifiants pour df_location
-    # Génération d'identifiants séquentiels pour df_location
     if not df_location.rdd.isEmpty():
         window_location = Window.orderBy(F.monotonically_increasing_id())
         df_location = df_location.withColumn("location_id", F.row_number().over(window_location) + (next_location_id - 1))
@@ -309,7 +308,6 @@ def filter_and_reassign_ids(df_location: DataFrame, df_parameter: DataFrame, df_
     df_parameter = df_parameter.filter(~F.col("parameter_name").isin(existing_parameters))
 
     # Réassignation des identifiants pour df_parameter
-    # Génération d'identifiants séquentiels pour df_parameter
     if not df_parameter.rdd.isEmpty():
         window_parameter = Window.orderBy(F.monotonically_increasing_id())
         df_parameter = df_parameter.withColumn("parameter_id", F.row_number().over(window_parameter) + (next_parameter_id - 1))
@@ -320,7 +318,6 @@ def filter_and_reassign_ids(df_location: DataFrame, df_parameter: DataFrame, df_
 
 
     # Réassignation des identifiants pour df_time
-    # Génération d'identifiants séquentiels pour df_time
     if not df_time.rdd.isEmpty():
         window_time = Window.orderBy(F.monotonically_increasing_id())
         df_time = df_time.withColumn("time_id", F.row_number().over(window_time) + (next_time_id - 1))

@@ -25,7 +25,7 @@ with DAG(
     dag_id='air_quality_pipeline',
     default_args=default_args,
     description='Pipeline de traitement des données de qualité de l\'air',
-    schedule_interval='*/30 * * * *',  # Exécution toutes les 30 minutes
+    schedule_interval='*/10 * * * *',  # Exécution toutes les 30 minutes
     start_date=datetime(2023, 1, 1),
     catchup=False,
 ) as dag:
