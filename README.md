@@ -12,6 +12,12 @@ Le projet est composé de plusieurs scripts Python et utilise Apache Airflow pou
 4. **Chargement des données** : Les tables dimensionnelles et factuelles sont ensuite chargées dans PostgreSQL pour une analyse efficace.
 5. **Orchestration** : Le processus global est orchestré par Airflow avec des tâches planifiées pour s'exécuter périodiquement (toutes les 10 minutes).
 
+### Architecture de la Pipeline
+
+Voici un schéma illustrant le flux de données et les interactions entre les différentes composantes du système :
+
+![Schéma de la Pipeline](img/Project_architecture.jpeg)
+
 ## Technologies Utilisées
 
 - **Apache Kafka** : Broker de messages distribué pour la gestion des flux de données.
@@ -105,4 +111,3 @@ Ce projet met en place un pipeline ETL robuste et scalable pour collecter, trans
 ## Auteur
 
 *Ouazzani Jamil Mehdi* - [Votre profil GitHub](https://github.com/Mehdi-24-K4)
-
