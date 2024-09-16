@@ -377,20 +377,6 @@ def create_tables_in_postgresql(engine):
             FOREIGN KEY (time_id) REFERENCES dimension_time(time_id)
         );
         """))
-        connection.execute(text("""
-        CREATE TABLE IF NOT EXISTS daily_aggregates (
-            date DATE,
-            parameter_name VARCHAR,
-            daily_avg DOUBLE PRECISION
-        );
-        """))
-        connection.execute(text("""
-        CREATE TABLE IF NOT EXISTS seasonal_trends (
-            season VARCHAR,
-            parameter_name VARCHAR,
-            seasonal_avg DOUBLE PRECISION
-        );
-        """))
 
         # Create indexes if they don't exist
         connection.execute(text("""
@@ -410,18 +396,6 @@ def create_tables_in_postgresql(engine):
         """))
         connection.execute(text("""
         CREATE INDEX IF NOT EXISTS idx_air_quality_measurements_time_id ON air_quality_measurements(time_id);
-        """))
-        connection.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_daily_aggregates_date ON daily_aggregates(date);
-        """))
-        connection.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_daily_aggregates_parameter_name ON daily_aggregates(parameter_name);
-        """))
-        connection.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_seasonal_trends_season ON seasonal_trends(season);
-        """))
-        connection.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_seasonal_trends_parameter_name ON seasonal_trends(parameter_name);
         """))
 
 def delete_existed_dimension(df_location, df_time, df_parameter, engine, spark):
@@ -765,12 +739,7 @@ def transform_store_postgreSQL():
                 print("fermeture de l'engin")
                 engine.dispose()
         else:
-            print("No new data from the API.")
-            try:
-                mark_data_as_processed()
-            except Exception as e:
-                print(f"Error marking data in MongoDB: {e}")
-                raise e        
+            print("No new data from the API.")      
     finally:
         spark.catalog.clearCache()
         spark.stop()

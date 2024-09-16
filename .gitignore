@@ -15,6 +15,7 @@ dataVerification.txt
 .dockerignore
 API_msg_format.json
 dashGrafana.py
+APi_key.txt
 # Ignore specific directories in the root of the project
 test/
 plugins/

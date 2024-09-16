@@ -6,7 +6,7 @@ API_URL = 'https://api.openaq.org/v2/latest'
 The URL of the OpenAQ API from which we will get real-time data
 """
 
-API_KEY = '625766118f3124ca6140bd0d9f7862bcd2a802ad05ebc8a239194ca8108e2308'
+API_KEY = 'YOUR_API_KEY_HERE'
 
 # KAFKA_BROKER = 'localhost:29092' #For local run
 KAFKA_BROKER = 'kafka:9092'
@@ -38,6 +38,3 @@ The name of the MongoDB collection where we will store the real-time data
 NUMBER_OF_PAGES = 2  # Nombre total de pages à consommer
 
 KAFKA_DATA_LENGTH = 100*NUMBER_OF_PAGES
-
-
-JAR_PATH = "C:/Users/amine/OneDrive/Bureau/ProjetDataEngMehdi/pilotes/postgresql-42.7.3.jar"
