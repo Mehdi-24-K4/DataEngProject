@@ -107,6 +107,10 @@ def convert_units_df(df):
                         .when((F.col("parameter_name") == "temperature") & F.col("unit").isin("f", "k", "c"), "°C")
                         .otherwise(F.col("unit")))
     
+    # Rename 'relativehumidity' to 'humidity'
+    df = df.withColumn("parameter_name", 
+                       F.when(F.col("parameter_name") == "relativehumidity", "humidity")
+                        .otherwise(F.col("parameter_name")))
     return df
 
 def clean_and_prepare_data(df):
