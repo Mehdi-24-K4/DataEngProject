@@ -1,6 +1,6 @@
-# Projet ETL pour l'Analyse des Données de la Qualité de l'Air
+# Projet ETL pour l'Analyse des Données de la Qualité de l'Air en temps réel
 
-Ce projet met en place un pipeline ETL (Extract, Transform, Load) pour l'analyse des données de qualité de l'air en utilisant l'API OpenAQ. Les données sont extraites, transformées et chargées dans une base de données PostgreSQL avec un schéma en étoile optimisé pour l'analyse. Le pipeline est orchestré via Airflow, et le traitement des données est accéléré grâce à Apache Spark.
+Ce projet met en place un pipeline ETL (Extract, Transform, Load) pour l'analyse des données de qualité de l'air en temps réel en utilisant l'API OpenAQ. Les données sont extraites, transformées et chargées dans une base de données PostgreSQL avec un schéma en étoile optimisé pour l'analyse. Le pipeline est orchestré via Airflow, et le traitement des données est accéléré grâce à Apache Spark.
 
 ## Description
 
