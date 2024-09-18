@@ -78,7 +78,7 @@ def produce_air_quality_data():
     """
     producer = getProducer()
     for page in (1,2):
-        data = fetch_air_quality_data()
+        data = fetch_air_quality_data(page)
     
         if data:
             for item in data:
